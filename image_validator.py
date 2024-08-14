@@ -2,11 +2,22 @@ import streamlit as st
 import numpy as np
 import cv2
 from glob import glob
-import requests
-import base64
-from PIL import Image
-from io import BytesIO
-import json
+from PIL import Image, ImageDraw
+from detectron2 import model_zoo
+from detectron2.engine import DefaultPredictor
+from detectron2.config import get_cfg
+import os
+
+if 'cfg' not in st.session_state:
+    cfg = get_cfg()
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
+    cfg.OUTPUT_DIR = "detectron_files"
+    cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
+    cfg.MODEL.DEVICE = 'cpu'
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1 
+    predictor = DefaultPredictor(cfg)
 
 def calculate_blurriness(im):
     return cv2.Laplacian(im, cv2.CV_64F).var()
@@ -24,19 +35,25 @@ def remove_blurriness(im):
     sharpen_kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
     return cv2.filter2D(im, -1, sharpen_kernel)
 
-regular_images = glob("../regular_images/*.jpg")
-blurry_images = glob("../blurry_images/*.jpg")
-uploaded_images = glob("../upload/*.jpg")
+def detect_tires(im):
+    outputs = predictor(im)
+    outputs = outputs["instances"].get_fields()
+    output_dict = {
+        "pred_boxes": outputs["pred_boxes"].tensor.numpy().tolist(),
+        "scores": outputs["scores"].numpy().tolist(),
+        # "pred_classes": outputs["pred_classes"].numpy().tolist(),
+        # "pred_masks": outputs["pred_masks"].numpy().tolist()
+    }
+    return output_dict
+
+uploaded_images = glob("upload/*.jpg")
 
 image_dict = {}
 for image in uploaded_images:
-    image_dict["Uploaded " + image.split('\\')[1]] = image
-
-for image in regular_images:
-    image_dict[image.split('\\')[1][:-4]] = image
-
-for image in blurry_images:
-    image_dict["blurry " + image.split('\\')[1][:-4]] = image
+    if '\\' in image:
+        image_dict[image.split('\\')[1]] = image
+    else:
+        image_dict[image.split('/')[1]] = image
     
 st.title("Image Quality")
 
@@ -48,7 +65,7 @@ im = cv2.imread(image_dict[option])
 api_online = True
 
 if api_online:
-    tab1, tab2 = st.tabs(["Metrics", "Blur Analysis"])
+    tab1, tab2, tab3 = st.tabs(["Metrics", "Blur Analysis", "Tire Detection"])
     blurriness = calculate_blurriness(im)
     brightness = calculate_brightness(im)
     laplacian = create_laplacian_image(im)
@@ -71,3 +88,17 @@ if api_online:
             unblurred_image = remove_blurriness(cv_image)
             unblurred_image = cv2.cvtColor(unblurred_image, cv2.COLOR_BGR2RGB)
             st.image(unblurred_image, "Attempted de-blurring of image")
+
+    tire_dict = detect_tires(im)
+    boxes = tire_dict["pred_boxes"]
+    scores = tire_dict["scores"]
+
+    with tab3:
+        if len(boxes) > 0:
+            im = Image.open(image_dict[option])
+            for i in range(len(boxes)):
+                draw = ImageDraw.Draw(im)
+                draw.rectangle(boxes[i], outline='red', width=3)
+            st.image(im)
+        else:
+            st.write("No Tires Detected")
