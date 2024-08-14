@@ -61,14 +61,16 @@ option = st.selectbox("Select image", options=image_dict.keys())
 st.image(image_dict[option],"Original Image")
 
 im = cv2.imread(image_dict[option])
+open_cv_image = im[:, :, ::-1].copy()
+gray = cv2.cvtColor(open_cv_image, cv2.COLOR_BGR2GRAY)
 
 api_online = True
 
 if api_online:
     tab1, tab2 = st.tabs(["Metrics", "Blur Analysis"])
-    blurriness = calculate_blurriness(im)
-    brightness = calculate_brightness(im)
-    laplacian = create_laplacian_image(im)
+    blurriness = calculate_blurriness(gray)
+    brightness = calculate_brightness(gray)
+    laplacian = create_laplacian_image(gray)
 
     if blurriness > 100:
         text = "Not Blurry"
